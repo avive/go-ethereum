@@ -20,7 +20,6 @@ import (
 	"github.com/ethereum/go-ethereum/swarm/network"
 	"github.com/ethereum/go-ethereum/swarm/pss"
 	"github.com/ethereum/go-ethereum/swarm/pss/client"
-	"github.com/ethereum/go-ethereum/swarm/pss/core"
 	"github.com/ethereum/go-ethereum/swarm/storage"
 )
 
@@ -129,7 +128,7 @@ func (t *testWrapper) newPssService(ctx *adapters.ServiceContext) node.Service {
 	}
 	addr := network.NewAddrFromNodeID(ctx.NodeID)
 	kad := network.NewKademlia(addr.Over(), network.NewKadParams())
-	return core.NewPss(kad, dpa, pss.NewPssParams())
+	return pss.NewPss(kad, dpa, pss.NewPssParams())
 }
 
 func (t *testWrapper) newTestService(ctx *adapters.ServiceContext) node.Service {
