@@ -6,8 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
+	//"math/rand"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -234,26 +235,62 @@ func TestPssSimpleLinear(t *testing.T) {
 	}
 }
 
-func TestPssFullRandom10_5_5(t *testing.T) {
+func TestPssFullRandom51_51_51(t *testing.T) {
 	adapter := adapters.NewSimAdapter(services)
-	testPssFullRandom(t, adapter, 10, 5, 5)
+	testPssFullRandom(t, adapter, 51, 51, 51)
+}
+
+func TestPssFullRandom50_50_50(t *testing.T) {
+	adapter := adapters.NewSimAdapter(services)
+	testPssFullRandom(t, adapter, 50, 50, 50)
+}
+
+func TestPssFullRandom25_25_25(t *testing.T) {
+	adapter := adapters.NewSimAdapter(services)
+	testPssFullRandom(t, adapter, 25, 25, 25)
+}
+
+func TestPssFullRandom10_10_10(t *testing.T) {
+	adapter := adapters.NewSimAdapter(services)
+	testPssFullRandom(t, adapter, 10, 10, 10)
+}
+
+func TestPssFullRandom5_5_5(t *testing.T) {
+	adapter := adapters.NewSimAdapter(services)
+	testPssFullRandom(t, adapter, 5, 5, 5)
 }
 
 func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int, fullnodecount int, msgcount int) {
-	var lastid discover.NodeID
-
-	nodeCount := 5
+	var i int
+	var msgfromids []discover.NodeID
+	var msgreceived []discover.NodeID
+	msgtoids := make([]discover.NodeID, msgcount)
+		
+	wg := sync.WaitGroup{}
+	wg.Add(msgcount)
+			
 	net := simulations.NewNetwork(adapter, &simulations.NetworkConfig{
 		ID: "0",
 	})
 	defer net.Shutdown()
 
 	trigger := make(chan discover.NodeID)
-	ids := make([]discover.NodeID, nodeCount)
+	ids := make([]discover.NodeID, nodecount)
 	fullids := ids[0:fullnodecount]
-	fullpeers := [][]byte{}
-
-	for i := 0; i < nodeCount; i++ {
+	fullpeers := make(map[discover.NodeID][]byte)
+	connections := &connmap{
+		conns: make(map[discover.NodeID][]discover.NodeID),
+		healthy: make(map[discover.NodeID]bool),
+		lock: sync.Mutex{},
+	}
+	
+	var connectiontargetcount int = nodecount / 2
+	if connectiontargetcount > 15 {
+		connectiontargetcount = 15
+	}
+	
+	
+	for i = 0; i < nodecount; i++ {
 		nodeconfig := adapters.RandomNodeConfig()
 		nodeconfig.Services = []string{"bzz", "pss"}
 		node, err := net.NewNodeWithConfig(nodeconfig)
@@ -265,68 +302,85 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 			t.Fatalf("error starting node %s: %s", node.ID().TerminalString(), err)
 		}
 
-		if err := triggerChecks(trigger, net, node.ID()); err != nil {
+		if err := triggerChecks(&wg, trigger, net, node.ID(), connections, connectiontargetcount); err != nil {
 			t.Fatal("error triggering checks for node %s: %s", node.ID().TerminalString(), err)
 		}
 		ids[i] = node.ID()
 		if i < fullnodecount {
-			fullpeers = append(fullpeers, network.ToOverlayAddr(node.ID().Bytes()))
+			//fullpeers = append(fullpeers, network.ToOverlayAddr(node.ID().Bytes()))
+			fullpeers[ids[i]] = network.ToOverlayAddr(node.ID().Bytes())
 		}
 	}
 
+	/*for i = 0; i < msgcount; i++ {
+		var toidx int
+		fromidx := rand.Int() % (len(fullids) - 1)
+		for {
+			toidx = rand.Int() % (len(fullids) - 1)
+			if fromidx != toidx {
+				break
+			}
+		}
+		msgfromids = append(msgfromids, fullids[fromidx])
+		msgtoids = append(msgtoids, fullids[toidx])
+	}*/
+	
+	for i, id := range fullids {
+		msgfromids = append(msgfromids, id)
+		msgtoids[i] = fullids[(i + (len(fullids) / 2) + 1) % len(fullids)]
+	}
+	
 	// run a simulation which connects the 10 nodes in a ring and waits
 	// for full peer discovery
 	action := func(ctx context.Context) error {
 		for i, id := range ids {
-			var peerID discover.NodeID
-			if i == 0 {
-				peerID = ids[len(ids)-1]
-			} else {
-				peerID = ids[i-1]
+			peerID := ids[(i + 1) % len(ids)]
+			if net.GetConn(id, peerID) != nil {
+				continue
 			}
 			if err := net.Connect(id, peerID); err != nil {
 				return err
 			}
+			/*for ii := i + 1; ii < i + connectiontargetcount + 1 ; ii++ {
+				peerID := ids[ii % len(ids)]
+				if net.GetConn(ids[i], peerID) != nil {
+					continue
+				}
+				if err := net.Connect(id, peerID); err != nil {
+					return err
+				}
+			}*/
 		}
 		return nil
 	}
 	check := func(ctx context.Context, id discover.NodeID) (bool, error) {
+		var fwd []byte
+		var tgt []byte
+		for i, fid := range msgfromids {
+			if id == fid {
+				tgt = network.ToOverlayAddr(msgtoids[(i + (len(msgtoids) / 2) + 1) % len(msgtoids)])
+				break
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
 		default:
 		}
-
-		node := net.GetNode(id)
-		if node == nil {
-			return false, fmt.Errorf("unknown node: %s", id)
-		}
-		client, err := node.Client()
+		p, err := net.GetPeer(id)
 		if err != nil {
-			return false, fmt.Errorf("error getting node client: %s", err)
+			return nil, err
 		}
-
-		for _, fid := range fullids {
-			if fid == id {
-				fpeeridx := rand.Int() % (fullnodecount - 1)
-				log.Debug(fmt.Sprintf("fpeeridx %d, fpeer len %d", fpeeridx, len(fullpeers)))
-				if bytes.Equal(fullpeers[fpeeridx], network.ToOverlayAddr(fid.Bytes())) {
-					fpeeridx++
-				}
-				msg := pss.PssPingMsg{Created: time.Now()}
-				code, _ := pss.PssPingProtocol.GetCode(&pss.PssPingMsg{})
-				pmsg, _ := pss.NewProtocolMsg(code, msg)
-				client.CallContext(context.Background(), nil, "pss_sendRaw", pss.PssPingTopic, pss.PssAPIMsg{
-					Addr: fullpeers[fpeeridx],
-					Msg:  pmsg,
-				})
-			}
+		c, err := p.Client()
+		if err != nil {
+			return nil, err
 		}
-		lastid = id
-
+		for !canfwd {
+			c.CallContext(context.Background(), &fwd, "pss_getForwarder", tgt)
+		}
 		return true, nil
 	}
-
+	
 	timeout := 5 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -343,18 +397,36 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 		t.Fatalf("simulation failed: %s", result.Error)
 	}
 
-	trigger = make(chan discover.NodeID)
-
 	action = func(ctx context.Context) error {
+		for ii, fid := range msgfromids {
+			node := net.GetNode(fid)
+			if node == nil {
+				return fmt.Errorf("unknown node: %s", fid)
+			}
+			client, err := node.Client()
+			if err != nil {
+				return fmt.Errorf("error getting node client: %s", err)
+			}
+			msg := pss.PssPingMsg{Created: time.Now()}
+			code, _ := pss.PssPingProtocol.GetCode(&pss.PssPingMsg{})
+			pmsg, _ := pss.NewProtocolMsg(code, msg)
+			client.CallContext(context.Background(), nil, "pss_sendRaw", pss.PssPingTopic, pss.PssAPIMsg{
+				Addr: fullpeers[msgtoids[ii]],
+				Msg:  pmsg,
+			})
+		}
 		return nil
 	}
 	check = func(ctx context.Context, id discover.NodeID) (bool, error) {
+		
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
 		default:
 		}
-
+		msgreceived = append(msgreceived, id)
+		log.Warn("trigger received", "id", id, "len", len(msgreceived))
+		wg.Add(-1)
 		return true, nil
 	}
 	timeout = 5 * time.Second
@@ -365,25 +437,31 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 		Action:  action,
 		Trigger: trigger,
 		Expect: &simulations.Expectation{
-			Nodes: fullids,
+			Nodes: msgtoids,
 			Check: check,
 		},
 	})
 	if result.Error != nil {
 		t.Fatalf("simulation failed: %s", result.Error)
 	}
+	
+	if len(msgreceived) != len(msgtoids) {
+		t.Fatalf("Simulation Failed, got %d of %d msgs", len(msgreceived), len(msgtoids))
+	}
 
-	t.Log("Simulation Passed:")
-	t.Logf("Duration: %s", result.FinishedAt.Sub(result.StartedAt))
-
-	time.Sleep(time.Second * 2)
+	wg.Wait()
+	
+	t.Logf("Simulation Passed, got %d of %d msgs", len(msgreceived), len(msgtoids))
+	cancel()
+	//t.Logf("Duration: %s", result.FinishedAt.Sub(result.StartedAt))
 }
 
 // triggerChecks triggers a simulation step check whenever a peer is added or
 // removed from the given node
-func triggerChecks(trigger chan discover.NodeID, net *simulations.Network, id discover.NodeID) error {
+// connections and connectionstarget are temporary kademlia check workarounds
+func triggerChecks(wg *sync.WaitGroup, trigger chan discover.NodeID, net *simulations.Network, id discover.NodeID, connections *connmap, connectionstargetcount int) error {
 
-	gotpeer := make(map[discover.NodeID]bool)
+	quitC := make(chan struct{})
 
 	node := net.GetNode(id)
 	if node == nil {
@@ -403,18 +481,36 @@ func triggerChecks(trigger chan discover.NodeID, net *simulations.Network, id di
 	msgevents := make(chan pss.PssAPIMsg)
 	msgsub, err := client.Subscribe(context.Background(), "pss", msgevents, "newMsg", pss.PssPingTopic)
 	if err != nil {
-		return fmt.Errorf("error getting peer events for node %v: %s", id, err)
+		return fmt.Errorf("error getting msg events for node %v: %s", id, err)
 	}
-
-	go func() {
+	
+	go func(connections *connmap) {
 		defer msgsub.Unsubscribe()
 		defer peersub.Unsubscribe()
 		for {
 			select {
 			case event := <-peerevents:
-				if event.Type == "add" && !gotpeer[event.Peer] {
-					trigger <- id
-					gotpeer[event.Peer] = true
+				if event.Type == "add" {
+					connections.lock.Lock()
+					if len(connections.conns[id]) == 0 {
+						trigger <- id
+					}
+					connections.conns[id] = append(connections.conns[id], event.Peer)
+					connections.lock.Unlock()
+					
+					
+					/*connections.lock.Lock()
+					connections.conns[id] = append(connections.conns[id], event.Peer)
+					connections.conns[event.Peer] = append(connections.conns[event.Peer], id)
+					if len(connections.conns[id]) >= connectionstargetcount && !connections.healthy[id] {
+						connections.healthy[id] = true
+						trigger <- id
+					} else if len(connections.conns[event.Peer]) >= connectionstargetcount  && !connections.healthy[event.Peer]  {
+						connections.healthy[event.Peer] = true
+						trigger <- event.Peer
+					}
+					connections.lock.Unlock()*/
+					
 				}
 			case <-msgevents:
 				trigger <- id
@@ -429,9 +525,18 @@ func triggerChecks(trigger chan discover.NodeID, net *simulations.Network, id di
 					log.Error(fmt.Sprintf("error getting msg for node %v", id), "err", err)
 				}
 				return
+			case <-quitC:
+				return
 			}
+			
 		}
+	}(connections)
+	
+	go func() {
+		wg.Wait()
+		quitC <- struct{}{}
 	}()
+	
 	return nil
 }
 
@@ -454,7 +559,8 @@ func newServices() adapters.Services {
 		return kademlias[id]
 	}
 	return adapters.Services{
-		"pss": func(id discover.NodeID, snapshot []byte) node.Service {
+		//"pss": func(id discover.NodeID, snapshot []byte) node.Service {
+		"pss": func(ctx *adapters.ServiceContext) node.Service {
 			cachedir, err := ioutil.TempDir("", "pss-cache")
 			if err != nil {
 				log.Error("create pss cache tmpdir failed", "error", err)
@@ -467,7 +573,7 @@ func newServices() adapters.Services {
 			}
 
 			pssp := pss.NewPssParams()
-			ps := NewPss(kademlia(id), dpa, pssp)
+			ps := NewPss(kademlia(ctx.NodeID), dpa, pssp)
 
 			ping := &pss.PssPing{
 				QuitC: make(chan struct{}),
@@ -480,14 +586,15 @@ func newServices() adapters.Services {
 
 			return ps
 		},
-		"bzz": func(id discover.NodeID, snapshot []byte) node.Service {
-			addr := network.NewAddrFromNodeID(id)
+		//"bzz": func(id discover.NodeID, snapshot []byte) node.Service {
+		"bzz": func(ctx *adapters.ServiceContext) node.Service {
+			addr := network.NewAddrFromNodeID(ctx.NodeID)
 			config := &network.BzzConfig{
 				OverlayAddr:  addr.Over(),
 				UnderlayAddr: addr.Under(),
 				HiveParams:   network.NewHiveParams(),
 			}
-			return network.NewBzz(config, kademlia(id), stateStore)
+			return network.NewBzz(config, kademlia(ctx.NodeID), stateStore)
 		},
 	}
 }
@@ -520,6 +627,12 @@ func newTestPss(addr []byte) *Pss {
 	ps := NewPss(overlay, dpa, pp)
 
 	return ps
+}
+
+type connmap struct {
+	conns map[discover.NodeID][]discover.NodeID
+	healthy map[discover.NodeID]bool
+	lock sync.Mutex
 }
 
 type testPssOverlayConn struct {

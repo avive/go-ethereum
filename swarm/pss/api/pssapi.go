@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/swarm/pss"
+	"github.com/ethereum/go-ethereum/swarm/network"
 )
 
 // PssAPI is the RPC API module for Pss
@@ -18,6 +19,14 @@ type PssAPI struct {
 // NewPssAPI constructs a PssAPI instance
 func NewPssAPI(ps pss.PssAdapter) *PssAPI {
 	return &PssAPI{PssAdapter: ps}
+}
+
+func (pssapi *PssAPI) GetForwarder(addr []byte) (raddr []byte) {
+	pssapi.PssAdapter.Overlay.EachLivePeer(addr, 255, func(p network.Peer, po int, isprox bool) bool {
+		raddr = p.Over()
+		return false
+	})
+	return
 }
 
 // NewMsg API endpoint creates an RPC subscription

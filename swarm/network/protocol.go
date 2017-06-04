@@ -261,7 +261,7 @@ func (self *bzzHandshake) String() string {
 	return fmt.Sprintf("Handshake: Version: %v, NetworkId: %v, Addr: %v", self.Version, self.NetworkId, self.Addr)
 }
 
-const bzzHandshakeTimeout = time.Second
+const bzzHandshakeTimeout = time.Second * 10
 
 func (self *bzzHandshake) Perform(p *p2p.Peer, rw p2p.MsgReadWriter) (err error) {
 	defer func() {
