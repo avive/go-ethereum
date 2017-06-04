@@ -1,36 +1,44 @@
 package pss
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/swarm/pss"
 	"github.com/ethereum/go-ethereum/swarm/network"
 )
 
 // PssAPI is the RPC API module for Pss
 type PssAPI struct {
-	pss.PssAdapter
+	*Pss
 }
 
 // NewPssAPI constructs a PssAPI instance
-func NewPssAPI(ps pss.PssAdapter) *PssAPI {
-	return &PssAPI{PssAdapter: ps}
+func NewPssAPI(ps *Pss) *PssAPI {
+	return &PssAPI{Pss: ps}
 }
 
-func (pssapi *PssAPI) GetForwarder(addr []byte) (raddr []byte) {
-	pssapi.PssAdapter.Overlay.EachLivePeer(addr, 255, func(p network.Peer, po int, isprox bool) bool {
-		raddr = p.Over()
-		return false
+// temporary for access to overlay while faking kademlia healthy routines
+func (pssapi *PssAPI) GetForwarder(addr []byte) (fwd struct {
+	Addr  []byte
+	Count int
+}) {
+	pssapi.Pss.Overlay.EachConn(addr, 255, func(op network.OverlayConn, po int, isproxbin bool) bool {
+		//pssapi.Pss.Overlay.EachLivePeer(addr, 255, func(p network.Peer, po int, isprox bool) bool {
+		if bytes.Equal(fwd.Addr, []byte{}) {
+			fwd.Addr = op.Address()
+		}
+		fwd.Count++
+		return true
 	})
 	return
 }
 
 // NewMsg API endpoint creates an RPC subscription
-func (pssapi *PssAPI) NewMsg(ctx context.Context, topic pss.PssTopic) (*rpc.Subscription, error) {
+func (pssapi *PssAPI) NewMsg(ctx context.Context, topic PssTopic) (*rpc.Subscription, error) {
 	notifier, supported := rpc.NotifierFromContext(ctx)
 	if !supported {
 		return nil, fmt.Errorf("Subscribe not supported")
@@ -38,7 +46,7 @@ func (pssapi *PssAPI) NewMsg(ctx context.Context, topic pss.PssTopic) (*rpc.Subs
 
 	psssub := notifier.CreateSubscription()
 	handler := func(msg []byte, p *p2p.Peer, from []byte) error {
-		apimsg := &pss.PssAPIMsg{
+		apimsg := &PssAPIMsg{
 			Msg:  msg,
 			Addr: from,
 		}
@@ -47,14 +55,14 @@ func (pssapi *PssAPI) NewMsg(ctx context.Context, topic pss.PssTopic) (*rpc.Subs
 		}
 		return nil
 	}
-	deregf := pssapi.PssAdapter.Register(&topic, handler)
+	deregf := pssapi.Pss.Register(&topic, handler)
 
 	go func() {
 		defer deregf()
 		//defer psssub.Unsubscribe()
 		select {
 		case err := <-psssub.Err():
-			log.Warn(fmt.Sprintf("caught subscription error in pss sub topic: %v", topic, err))
+			log.Warn(fmt.Sprintf("caught subscription error in pss sub topic %x: %v", topic, err))
 		case <-notifier.Closed():
 			log.Warn(fmt.Sprintf("rpc sub notifier closed"))
 		}
@@ -64,8 +72,8 @@ func (pssapi *PssAPI) NewMsg(ctx context.Context, topic pss.PssTopic) (*rpc.Subs
 }
 
 // SendRaw sends the message (serialized into byte slice) to a peer with topic
-func (pssapi *PssAPI) SendRaw(topic pss.PssTopic, msg pss.PssAPIMsg) error {
-	err := pssapi.PssAdapter.Send(msg.Addr, topic, msg.Msg)
+func (pssapi *PssAPI) SendRaw(topic PssTopic, msg PssAPIMsg) error {
+	err := pssapi.Pss.Send(msg.Addr, topic, msg.Msg)
 	if err != nil {
 		return fmt.Errorf("send error: %v", err)
 	}
@@ -75,5 +83,5 @@ func (pssapi *PssAPI) SendRaw(topic pss.PssTopic, msg pss.PssAPIMsg) error {
 // BaseAddr gets our own overlayaddress
 func (pssapi *PssAPI) BaseAddr() ([]byte, error) {
 	log.Warn("inside baseaddr")
-	return pssapi.PssAdapter.BaseAddr(), nil
+	return pssapi.Pss.BaseAddr(), nil
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/pot"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
-	pss "github.com/ethereum/go-ethereum/swarm/pss"
+	"github.com/ethereum/go-ethereum/swarm/pss"
 )
 
 const (

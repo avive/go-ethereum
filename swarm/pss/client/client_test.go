@@ -14,9 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/protocols"
 	"github.com/ethereum/go-ethereum/pot"
 	"github.com/ethereum/go-ethereum/rpc"
-	//"github.com/ethereum/go-ethereum/swarm/pss"
 	"github.com/ethereum/go-ethereum/swarm/pss"
-	pssapi "github.com/ethereum/go-ethereum/swarm/pss/api"
 )
 
 func init() {
@@ -26,7 +24,7 @@ func init() {
 
 func TestRunProtocol(t *testing.T) {
 	quitC := make(chan struct{})
-	ps := newTestPss(nil)
+	ps := pss.NewTestPss(nil)
 	ping := &pss.PssPing{
 		QuitC: make(chan struct{}),
 	}
@@ -40,7 +38,7 @@ func TestRunProtocol(t *testing.T) {
 
 func TestIncoming(t *testing.T) {
 	quitC := make(chan struct{})
-	ps := newTestPss(nil)
+	ps := pss.NewTestPss(nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	var addr []byte
 	ping := &pss.PssPing{
@@ -86,7 +84,7 @@ func TestIncoming(t *testing.T) {
 
 func TestOutgoing(t *testing.T) {
 	quitC := make(chan struct{})
-	ps := newTestPss(nil)
+	ps := pss.NewTestPss(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond * 250)
 	var addr []byte
 	var potaddr pot.Address
@@ -117,7 +115,7 @@ func TestOutgoing(t *testing.T) {
 	quitC <- struct{}{}
 }
 
-func baseTester(t *testing.T, proto *p2p.Protocol, ps pss.PssAdapter, ctx context.Context, cancel func(), quitC chan struct{}) (*PssClient, error) {
+func baseTester(t *testing.T, proto *p2p.Protocol, ps *pss.Pss, ctx context.Context, cancel func(), quitC chan struct{}) (*PssClient, error) {
 	var err error
 	
 	client := newClient(t, ctx, cancel, quitC)
@@ -158,9 +156,9 @@ func newClient(t *testing.T, ctx context.Context, cancel func(), quitC chan stru
 	
 	pssclient := NewPssClient(ctx, cancel, conf)
 	
-	ps := newTestPss([]byte{0})
+	ps := pss.NewTestPss(nil)
 	srv := rpc.NewServer()
-	srv.RegisterName("pss", pssapi.NewPssAPI(ps))
+	srv.RegisterName("pss", pss.NewPssAPI(ps))
 	ws := srv.WebsocketHandler([]string{"*"})
 	uri := fmt.Sprintf("%s:%d", "localhost", 8546)
 	
@@ -180,8 +178,8 @@ func newClient(t *testing.T, ctx context.Context, cancel func(), quitC chan stru
 	return pssclient
 } 
 
-
-func newTestPss(addr []byte) pss.PssAdapter {	
+/*
+func newTestPss(addr []byte) *pss.Pss {	
 	return &testPss{
 		addr: addr,
 	}
@@ -222,3 +220,4 @@ func (self *testPss) APIs() []rpc.API {
 func (self *testPss) Process(pssmsg *pss.PssMsg) error {
 	return nil
 }
+*/

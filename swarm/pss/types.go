@@ -5,35 +5,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"time"
-	
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto/sha3"
 	"github.com/ethereum/go-ethereum/p2p"
-	//"github.com/ethereum/go-ethereum/pot"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/swarm/network"
 )
 
 const (
-	TopicLength                 = 32
-	DefaultTTL                  = 6000
-	defaultDigestCacheTTL       = time.Second
+	TopicLength           = 32
+	DefaultTTL            = 6000
+	defaultDigestCacheTTL = time.Second
 )
-
-type PssAdapter interface {
-	Send (to []byte, topic PssTopic, msg []byte) error
-	Register(topic *PssTopic, handler PssHandler) func()
-	BaseAddr() []byte
-	// implements node.Service
-	Start(srv *p2p.Server) error
-	Stop() error
-	Protocols() []p2p.Protocol
-	APIs() []rpc.API
-	Process(pssmsg *PssMsg) error
-	/*IsActive(pot.Address, PssTopic) bool
-	AddPeer (*p2p.Peer, pot.Address, func(*p2p.Peer, p2p.MsgReadWriter) error, PssTopic, p2p.MsgReadWriter) error */
-}
 
 // Defines params for Pss
 type PssParams struct {
@@ -55,14 +38,8 @@ type PssMsg struct {
 
 func (msg *PssMsg) Serialize() []byte {
 	rlpdata, _ := rlp.EncodeToBytes(msg)
-	/*buf := bytes.NewBuffer(nil)
-	buf.Write(self.PssEnvelope.Topic[:])
-	buf.Write(self.PssEnvelope.Payload)
-	buf.Write(self.PssEnvelope.From)
-	return buf.Bytes()*/
 	return rlpdata
 }
-
 
 // String representation of PssMsg
 func (self *PssMsg) String() string {

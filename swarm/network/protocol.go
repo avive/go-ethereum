@@ -157,11 +157,17 @@ func (b *Bzz) Stop() error {
 func (b *Bzz) runHandshake(p *p2p.Peer, rw p2p.MsgReadWriter) error {
 	handshake := b.getHandshake(p.ID())
 	defer b.removeHandshake(p.ID())
+	n := fmt.Sprintf("%s", b.localAddr.UAddr[8:24])
+	bz := fmt.Sprintf("%x", b.localAddr.OAddr[:8])
+	peerid := p.ID()
+	peeroaddr := ToOverlayAddr(peerid[:])
 
 	if err := handshake.Perform(p, rw); err != nil {
-		log.Error("handshake failed", "peer", p.ID(), "err", err)
+		log.Error("handshake failed", "peer", peerid, "peeroaddr", fmt.Sprintf("%x", peeroaddr[:8]), "self", n, "selfoaddr", bz, "err", err)
 		return err
 	}
+
+	log.Debug("handshake received", "peer", peerid, "peeroaddr", fmt.Sprintf("%x", peeroaddr[:8]), "self", n, "selfoaddr", bz)
 
 	// fail if we get another handshake
 	msg, err := rw.ReadMsg()
@@ -169,6 +175,7 @@ func (b *Bzz) runHandshake(p *p2p.Peer, rw p2p.MsgReadWriter) error {
 		return err
 	}
 	msg.Discard()
+	log.Error("handshake DUPLICATE received", "peer", peerid, "peeroaddr", fmt.Sprintf("%x", peeroaddr[:8]), "self", n, "selfoaddr", bz)
 	return errors.New("received multiple handshakes")
 }
 
@@ -261,7 +268,7 @@ func (self *bzzHandshake) String() string {
 	return fmt.Sprintf("Handshake: Version: %v, NetworkId: %v, Addr: %v", self.Version, self.NetworkId, self.Addr)
 }
 
-const bzzHandshakeTimeout = time.Second * 10
+const bzzHandshakeTimeout = time.Second
 
 func (self *bzzHandshake) Perform(p *p2p.Peer, rw p2p.MsgReadWriter) (err error) {
 	defer func() {
