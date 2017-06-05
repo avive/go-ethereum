@@ -67,15 +67,14 @@ type pssDigest [digestLength]byte
 // - a dispatcher lookup, mapping protocols to topics
 // - a message cache to spot messages that previously have been forwarded
 type Pss struct {
-	network.Overlay // we can get the overlayaddress from this
-	//peerPool map[pot.Address]map[PssTopic]p2p.MsgReadWriter // keep track of all virtual p2p.Peers we are currently speaking to
-	peerPool map[pot.Address]map[PssTopic]p2p.MsgReadWriter // keep track of all virtual p2p.Peers we are currently speaking to
-	fwdPool  map[pot.Address]*protocols.Peer                // keep track of all peers sitting on the pssmsg routing layer
-	handlers map[PssTopic]map[*PssHandler]bool              // topic and version based pss payload handlers
-	fwdcache map[pssDigest]pssCacheEntry                    // checksum of unique fields from pssmsg mapped to expiry, cache to determine whether to drop msg
-	cachettl time.Duration                                  // how long to keep messages in fwdcache
-	lock     sync.Mutex
-	dpa      *storage.DPA
+	network.Overlay                                                // we can get the overlayaddress from this
+	peerPool        map[pot.Address]map[PssTopic]p2p.MsgReadWriter // keep track of all virtual p2p.Peers we are currently speaking to
+	fwdPool         map[pot.Address]*protocols.Peer                // keep track of all peers sitting on the pssmsg routing layer
+	handlers        map[PssTopic]map[*PssHandler]bool              // topic and version based pss payload handlers
+	fwdcache        map[pssDigest]pssCacheEntry                    // checksum of unique fields from pssmsg mapped to expiry, cache to determine whether to drop msg
+	cachettl        time.Duration                                  // how long to keep messages in fwdcache
+	lock            sync.Mutex
+	dpa             *storage.DPA
 }
 
 func (self *Pss) storeMsg(msg *PssMsg) (pssDigest, error) {
@@ -420,21 +419,6 @@ func (prw PssReadWriter) WriteMsg(msg p2p.Msg) error {
 	}
 	return prw.Pss.Send(prw.To.Bytes(), *prw.topic, pmsg)
 }
-
-/*func (prw PssReadWriter) WriteMsg(msg p2p.Msg) error {
-	log.Trace(fmt.Sprintf("pssrw writemsg: %v", msg))
-	ifc, found := prw.spec.NewMsg(msg.Code)
-	if !found {
-		return fmt.Errorf("Writemsg couldn't find matching interface for code %d", msg.Code)
-	}
-	msg.Decode(ifc)
-
-	pmsg, err := NewProtocolMsg(msg.Code, ifc)
-	if err != nil {
-		return err
-	}
-	return prw.Pss.Send(prw.To.Bytes(), *prw.topic, pmsg)
-}*/
 
 // Injects a p2p.Msg into the MsgReadWriter, so that it appears on the associated p2p.MsgReader
 func (prw PssReadWriter) injectMsg(msg p2p.Msg) error {

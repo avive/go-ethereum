@@ -277,13 +277,13 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 	})
 	defer net.Shutdown()
 
-	timeout := 10 * time.Second
+	timeout := 15 * time.Second
 	ctx, cancelmain := context.WithTimeout(context.Background(), timeout)
 	defer cancelmain()
-	
+
 	trigger := make(chan discover.NodeID)
 	triggerptr = &trigger
-	
+
 	ids := make([]discover.NodeID, nodecount)
 	fullids := ids[0:fullnodecount]
 	fullpeers := make(map[discover.NodeID][]byte)
@@ -378,15 +378,16 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 		t.Fatalf("simulation failed: %s", result.Error)
 		cancelmain()
 	}
-	
+
 	trigger = make(chan discover.NodeID)
 	triggerptr = &trigger
-	
+
 	action = func(ctx context.Context) error {
-		for ii, fid := range msgfromids {
-			node := net.GetNode(fid)
+		var rpcerr error
+		for ii, id := range msgfromids {
+			node := net.GetNode(id)
 			if node == nil {
-				return fmt.Errorf("unknown node: %s", fid)
+				return fmt.Errorf("unknown node: %s", id)
 			}
 			client, err := node.Client()
 			if err != nil {
@@ -395,10 +396,13 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 			msg := PssPingMsg{Created: time.Now()}
 			code, _ := PssPingProtocol.GetCode(&PssPingMsg{})
 			pmsg, _ := NewProtocolMsg(code, msg)
-			client.CallContext(context.Background(), nil, "pss_sendRaw", PssPingTopic, PssAPIMsg{
+			client.CallContext(ctx, &rpcerr, "pss_sendRaw", PssPingTopic, PssAPIMsg{
 				Addr: fullpeers[msgtoids[ii]],
 				Msg:  pmsg,
 			})
+			if rpcerr != nil {
+				return fmt.Errorf("error rpc send id %x: %v", id, rpcerr)
+			}
 		}
 		return nil
 	}
@@ -407,12 +411,11 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 		select {
 		case <-ctx.Done():
 			wg.Done()
-			psslog[id].Error("msg failed!", "id", id)
 			return false, ctx.Err()
 		default:
 		}
 		msgreceived = append(msgreceived, id)
-		psslog[id].Warn("trigger received", "id", id, "len", len(msgreceived))
+		psslog[id].Info("trigger received", "id", id, "len", len(msgreceived))
 		wg.Done()
 		return true, nil
 	}
@@ -426,6 +429,7 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 		},
 	})
 	if result.Error != nil {
+		psslogmain.Error("msg failed!", "err", result.Error)
 		cancelmain()
 		t.Fatalf("simulation failed: %s", result.Error)
 	}
@@ -564,7 +568,6 @@ func newServices() adapters.Services {
 		},
 	}
 }
-
 
 type connmap struct {
 	conns   map[discover.NodeID][]discover.NodeID

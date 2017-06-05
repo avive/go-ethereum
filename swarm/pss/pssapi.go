@@ -38,7 +38,7 @@ func (pssapi *PssAPI) GetForwarder(addr []byte) (fwd struct {
 }
 
 // NewMsg API endpoint creates an RPC subscription
-func (pssapi *PssAPI) NewMsg(ctx context.Context, topic PssTopic) (*rpc.Subscription, error) {
+func (pssapi *PssAPI) Receive(ctx context.Context, topic PssTopic) (*rpc.Subscription, error) {
 	notifier, supported := rpc.NotifierFromContext(ctx)
 	if !supported {
 		return nil, fmt.Errorf("Subscribe not supported")
@@ -59,7 +59,6 @@ func (pssapi *PssAPI) NewMsg(ctx context.Context, topic PssTopic) (*rpc.Subscrip
 
 	go func() {
 		defer deregf()
-		//defer psssub.Unsubscribe()
 		select {
 		case err := <-psssub.Err():
 			log.Warn(fmt.Sprintf("caught subscription error in pss sub topic %x: %v", topic, err))
@@ -72,7 +71,7 @@ func (pssapi *PssAPI) NewMsg(ctx context.Context, topic PssTopic) (*rpc.Subscrip
 }
 
 // SendRaw sends the message (serialized into byte slice) to a peer with topic
-func (pssapi *PssAPI) SendRaw(topic PssTopic, msg PssAPIMsg) error {
+func (pssapi *PssAPI) Send(topic PssTopic, msg PssAPIMsg) error {
 	err := pssapi.Pss.Send(msg.Addr, topic, msg.Msg)
 	if err != nil {
 		return fmt.Errorf("send error: %v", err)

@@ -25,11 +25,23 @@ const (
 	addrLen        = common.HashLength
 )
 
+// RemoteHost: hostname of node running websockets proxy to pss (default localhost)
+// RemotePort: port of node running websockets proxy to pss (0 = go-ethereum node default)
+// Secure: whether or not to use secure connection
+// SelfHost: local if host to connect from
 type PssClientConfig struct {
 	SelfHost   string
 	RemoteHost string
 	RemotePort int
 	Secure     bool
+}
+
+func NewPssClientConfig() *PssClientConfig {
+	return &PssClientConfig{
+		SelfHost:   "localhost",
+		RemoteHost: "localhost",
+		RemotePort: 8546,
+	}
 }
 
 type PssClient struct {
@@ -51,24 +63,22 @@ type PssClient struct {
 type pssRPCRW struct {
 	*PssClient
 	topic *pss.PssTopic
-	//spec  *protocols.Spec
-	msgC chan []byte
-	addr pot.Address
+	msgC  chan []byte
+	addr  pot.Address
 }
 
 func (self *PssClient) newpssRPCRW(addr pot.Address, topic *pss.PssTopic) *pssRPCRW {
 	return &pssRPCRW{
 		PssClient: self,
 		topic:     topic,
-		//spec:      spec,
-		msgC: make(chan []byte),
-		addr: addr,
+		msgC:      make(chan []byte),
+		addr:      addr,
 	}
 }
 
 func (rw *pssRPCRW) ReadMsg() (p2p.Msg, error) {
 	msg := <-rw.msgC
-	log.Warn("pssrpcrw read", "msg", msg)
+	log.Trace("pssrpcrw read", "msg", msg)
 	pmsg, err := pss.ToP2pMsg(msg)
 	if err != nil {
 		return p2p.Msg{}, err
@@ -78,7 +88,7 @@ func (rw *pssRPCRW) ReadMsg() (p2p.Msg, error) {
 }
 
 func (rw *pssRPCRW) WriteMsg(msg p2p.Msg) error {
-	log.Warn("got writemsg pssclient", "msg", msg)
+	log.Trace("got writemsg pssclient", "msg", msg)
 	rlpdata := make([]byte, msg.Size)
 	msg.Payload.Read(rlpdata)
 	pmsg, err := rlp.EncodeToBytes(pss.PssProtocolMsg{
@@ -89,35 +99,11 @@ func (rw *pssRPCRW) WriteMsg(msg p2p.Msg) error {
 	if err != nil {
 		return err
 	}
-	return rw.PssClient.ws.CallContext(rw.PssClient.ctx, nil, "pss_sendRaw", rw.topic, pss.PssAPIMsg{
+	return rw.PssClient.ws.CallContext(rw.PssClient.ctx, nil, "pss_send", rw.topic, pss.PssAPIMsg{
 		Addr: rw.addr.Bytes(),
 		Msg:  pmsg,
 	})
 }
-
-/*func (rw *pssRPCRW) WriteMsg(msg p2p.Msg) error {
-
-	ifc, found := rw.spec.NewMsg(msg.Code)
-	if !found {
-		return fmt.Errorf("could not find interface for msg #%d", msg.Code)
-	}
-	msg.Decode(ifc)
-	pmsg, err := newProtocolMsg(msg.Code, ifc)
-	if err != nil {
-		return fmt.Errorf("Could not render protocolmessage", "error", err)
-	}
-
-	return rw.PssClient.ws.CallContext(rw.PssClient.ctx, nil, "pss_sendRaw", rw.topic, PssAPIMsg{
-		Addr: rw.addr.Bytes(),
-		Msg:  pmsg,
-	})
-
-}*/
-
-// remotehost: hostname of node running websockets proxy to pss (default localhost)
-// remoteport: port of node running websockets proxy to pss (0 = go-ethereum node default)
-// secure: whether or not to use secure connection
-// originhost: local if host to connect from
 
 func NewPssClient(ctx context.Context, cancel func(), config *PssClientConfig) *PssClient {
 	prefix := "ws"
@@ -191,12 +177,11 @@ func (self *PssClient) Start() error {
 	return nil
 }
 
-//func (self *PssClient) RunProtocol(proto *p2p.Protocol, spec *protocols.Spec) error {
 func (self *PssClient) RunProtocol(proto *p2p.Protocol) error {
 	topic := pss.NewTopic(proto.Name, int(proto.Version))
 	msgC := make(chan pss.PssAPIMsg)
 	self.peerPool[topic] = make(map[pot.Address]*pssRPCRW)
-	sub, err := self.ws.Subscribe(self.ctx, "pss", msgC, "newMsg", topic)
+	sub, err := self.ws.Subscribe(self.ctx, "pss", msgC, "receive", topic)
 	if err != nil {
 		return fmt.Errorf("pss event subscription failed: %v", err)
 	}
