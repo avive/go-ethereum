@@ -21,12 +21,14 @@ const (
 // Defines params for Pss
 type PssParams struct {
 	Cachettl time.Duration
+	Debug bool
 }
 
 // Initializes default params for Pss
-func NewPssParams() *PssParams {
+func NewPssParams(debug bool) *PssParams {
 	return &PssParams{
 		Cachettl: defaultDigestCacheTTL,
+		Debug: debug,
 	}
 }
 

@@ -51,7 +51,7 @@ func TestIncoming(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	client.ws.Call(&addr, "pss_baseAddr")
+	client.ws.Call(&addr, "psstest_baseAddr")
 
 	code, _ := pss.PssPingProtocol.GetCode(&pss.PssPingMsg{})
 	rlpbundle, err := pss.NewProtocolMsg(code, &pss.PssPingMsg{
@@ -103,7 +103,7 @@ func TestOutgoing(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	client.ws.Call(&addr, "pss_baseAddr")
+	client.ws.Call(&addr, "psstest_baseAddr")
 	copy(potaddr[:], addr)
 
 	msg := &pss.PssPingMsg{
@@ -166,6 +166,7 @@ func newClient(t *testing.T, ctx context.Context, cancel func(), quitC chan stru
 	ps := pss.NewTestPss(nil)
 	srv := rpc.NewServer()
 	srv.RegisterName("pss", pss.NewPssAPI(ps))
+	srv.RegisterName("psstest", pss.NewPssAPITest(ps))
 	ws := srv.WebsocketHandler([]string{"*"})
 	uri := fmt.Sprintf("%s:%d", "localhost", 8546)
 

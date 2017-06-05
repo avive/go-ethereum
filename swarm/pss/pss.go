@@ -75,6 +75,7 @@ type Pss struct {
 	cachettl        time.Duration                                  // how long to keep messages in fwdcache
 	lock            sync.Mutex
 	dpa             *storage.DPA
+	debug		bool
 }
 
 func (self *Pss) storeMsg(msg *PssMsg) (pssDigest, error) {
@@ -104,6 +105,7 @@ func NewPss(k network.Overlay, dpa *storage.DPA, params *PssParams) *Pss {
 		fwdcache: make(map[pssDigest]pssCacheEntry),
 		cachettl: params.Cachettl,
 		dpa:      dpa,
+		debug:	params.Debug,
 	}
 }
 
@@ -139,7 +141,7 @@ func (self *Pss) Run(p *p2p.Peer, rw p2p.MsgReadWriter) error {
 }
 
 func (self *Pss) APIs() []rpc.API {
-	return []rpc.API{
+	apis := []rpc.API{
 		rpc.API{
 			Namespace: "pss",
 			Version:   "0.1",
@@ -147,6 +149,15 @@ func (self *Pss) APIs() []rpc.API {
 			Public:    true,
 		},
 	}
+	if self.debug {
+		apis = append(apis, rpc.API{
+			Namespace: "pss",
+			Version:   "0.1",
+			Service:   NewPssAPITest(self),
+			Public:    true,
+		})
+	}
+	return apis
 }
 
 // Takes the generated PssTopic of a protocol/chatroom etc, and links a handler function to it

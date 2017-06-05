@@ -99,7 +99,7 @@ func (rw *pssRPCRW) WriteMsg(msg p2p.Msg) error {
 	if err != nil {
 		return err
 	}
-	return rw.PssClient.ws.CallContext(rw.PssClient.ctx, nil, "pss_send", rw.topic, pss.PssAPIMsg{
+	return rw.PssClient.ws.CallContext(rw.PssClient.ctx, nil, "pss_sendPss", rw.topic, pss.PssAPIMsg{
 		Addr: rw.addr.Bytes(),
 		Msg:  pmsg,
 	})
@@ -181,7 +181,7 @@ func (self *PssClient) RunProtocol(proto *p2p.Protocol) error {
 	topic := pss.NewTopic(proto.Name, int(proto.Version))
 	msgC := make(chan pss.PssAPIMsg)
 	self.peerPool[topic] = make(map[pot.Address]*pssRPCRW)
-	sub, err := self.ws.Subscribe(self.ctx, "pss", msgC, "receive", topic)
+	sub, err := self.ws.Subscribe(self.ctx, "pss", msgC, "receivePss", topic)
 	if err != nil {
 		return fmt.Errorf("pss event subscription failed: %v", err)
 	}

@@ -96,7 +96,7 @@ func NewTestPss(addr []byte) *Pss {
 	kp.MinProxBinSize = 3
 
 	// create pss
-	pp := NewPssParams()
+	pp := NewPssParams(true)
 
 	overlay := network.NewKademlia(addr, kp)
 	ps := NewPss(overlay, dpa, pp)

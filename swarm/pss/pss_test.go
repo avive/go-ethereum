@@ -36,7 +36,7 @@ var services = newServices()
 func init() {
 	adapters.RegisterServices(services)
 	hs := log.StreamHandler(os.Stderr, log.TerminalFormat(true))
-	hf := log.LvlFilterHandler(log.LvlDebug, hs)
+	hf := log.LvlFilterHandler(log.LvlTrace, hs)
 	h := log.CallerFileHandler(hf)
 	log.Root().SetHandler(h)
 }
@@ -49,7 +49,7 @@ func TestPssCache(t *testing.T) {
 	//proofbytes := []byte{241, 172, 117, 105, 88, 154, 82, 33, 176, 188, 91, 244, 245, 85, 86, 16, 120, 232, 70, 45, 182, 188, 99, 103, 157, 3, 202, 121, 252, 21, 129, 22}
 	proofbytes, _ := hex.DecodeString("822fff7527f7ae630c1224921e50a7ca1b27324f00f3966623bd503780c7ab33")
 	ps := NewTestPss(oaddr)
-	pp := NewPssParams()
+	pp := NewPssParams(false)
 	data := []byte("foo")
 	datatwo := []byte("bar")
 	fwdaddr := network.RandomAddr()
@@ -396,7 +396,7 @@ func testPssFullRandom(t *testing.T, adapter adapters.NodeAdapter, nodecount int
 			msg := PssPingMsg{Created: time.Now()}
 			code, _ := PssPingProtocol.GetCode(&PssPingMsg{})
 			pmsg, _ := NewProtocolMsg(code, msg)
-			client.CallContext(ctx, &rpcerr, "pss_sendRaw", PssPingTopic, PssAPIMsg{
+			client.CallContext(ctx, &rpcerr, "pss_sendPss", PssPingTopic, PssAPIMsg{
 				Addr: fullpeers[msgtoids[ii]],
 				Msg:  pmsg,
 			})
@@ -468,7 +468,7 @@ func triggerChecks(ctx context.Context, wg *sync.WaitGroup, trigger *chan discov
 	}
 
 	msgevents := make(chan PssAPIMsg)
-	msgsub, err := client.Subscribe(context.Background(), "pss", msgevents, "newMsg", PssPingTopic)
+	msgsub, err := client.Subscribe(context.Background(), "pss", msgevents, "receivePss", PssPingTopic)
 	if err != nil {
 		return fmt.Errorf("error getting msg events for node %v: %s", id, err)
 	}
@@ -542,7 +542,7 @@ func newServices() adapters.Services {
 				return nil
 			}
 
-			pssp := NewPssParams()
+			pssp := NewPssParams(true)
 			ps := NewPss(kademlia(ctx.NodeID), dpa, pssp)
 
 			ping := &PssPing{
