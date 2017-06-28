@@ -236,7 +236,11 @@ func (self *Pss) checkFwdCache(addr []byte, digest pssDigest) bool {
 		} else if entry.expiresAt.IsZero() && bytes.Equal(addr, entry.receivedFrom) {
 			log.Debug(fmt.Sprintf("sendermatch %x for digest %x", common.ByteLabel(addr), digest))
 			return true
+		} else {
+			log.Trace("Pss forward cache record found but expired", "digest", digest, "expiresat", entry.expiresAt, "addr", addr)
 		}
+	} else {
+		log.Trace("No pss forward cache record", "digest", digest, "addr", addr)
 	}
 	return false
 }
