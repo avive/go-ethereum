@@ -26,7 +26,16 @@ import (
 	"sync/atomic"
 )
 
+const (
+	DefaultSegmentCount int = 128 // Should be equal to storage.DefaultBranches
+	DefaultPoolSize         = 8
+)
+
 type Hasher func() hash.Hash
+
+type EOC struct {
+	Hash []byte // read the hash of the chunk off the error
+}
 
 // a reusable hasher for fixed maximum size chunks representing a BMT
 // implements the hash.Hash interface
@@ -38,27 +47,26 @@ type Hasher func() hash.Hash
 // Reset gives back the BMTree to the pool and guaranteed to leave
 // the tree and itself in a state reusable for hashing a new chunk
 type BMTHasher struct {
-	pool      *BMTreePool // BMT resource pool
-	release   bool        // whether to release the Tree to the pool
-	bmt       *BMTree     // prebuilt BMT resource for flowcontrol and proofs
-	blocksize int         // segment size (size of hash) also for hash.Hash
-	count     int         // segment count
-	size      int         // for hash.Hash same as hashsize
-	cur       int         // cursor position for righmost currently open chunk
-	segment   []byte      // the rightmost open segment (not complete)
-	depth     int         // index of last level
-	result    chan []byte // result channel
-	hash      []byte      // to record the result
-	max       int32       // max segments for SegmentWriter interface
+	pool        *BMTreePool // BMT resource pool
+	bmt         *BMTree     // prebuilt BMT resource for flowcontrol and proofs
+	blocksize   int         // segment size (size of hash) also for hash.Hash
+	count       int         // segment count
+	size        int         // for hash.Hash same as hashsize
+	cur         int         // cursor position for righmost currently open chunk
+	segment     []byte      // the rightmost open segment (not complete)
+	depth       int         // index of last level
+	result      chan []byte // result channel
+	hash        []byte      // to record the result
+	max         int32       // max segments for SegmentWriter interface
+	blockLength []byte      // The block length that needes to be added in Sum
 }
 
 // creates a reusable BMTHasher
 // implements the hash.Hash interface
 // pulls a new BMTree from a resource pool for hashing each chunk
-func NewBMTHasher(p *BMTreePool, release bool) *BMTHasher {
+func NewBMTHasher(p *BMTreePool) *BMTHasher {
 	return &BMTHasher{
 		pool:      p,
-		release:   release,
 		depth:     depth(p.SegmentCount),
 		size:      p.SegmentSize,
 		blocksize: p.SegmentSize,
@@ -265,10 +273,9 @@ func (self *BMTHasher) BlockSize() int {
 // hash.Hash interface Sum method appends the byte slice to the underlying
 // data before it calculates and returns the hash of the chunk
 func (self *BMTHasher) Sum(b []byte) (r []byte) {
-	t := self.getTree()
-	self.Write(b)
+	t := self.bmt
 	i := self.cur
-	// fmt.Printf("finalise for node index %v (leaves: %v)\n", i, len(t.leaves))
+	//fmt.Printf("finalise for node index %v (leaves: %v)\n", i, len(t.leaves))
 	n := t.leaves[i]
 	j := i
 	// must run strictly before all nodes calculate
@@ -279,9 +286,20 @@ func (self *BMTHasher) Sum(b []byte) (r []byte) {
 		i *= 2
 	}
 	d := self.finalise(n, i)
-	// fmt.Printf("finalise for node level %v index %v depth %v\n", n.level, i, d)
+	//fmt.Printf("finalise for node level %v index %v depth %v, %v, %v\n", n.level, i, d, j, len(self.segment))
 	self.writeSegment(j, self.segment, d)
-	return <-self.result
+	c := <-self.result
+	self.releaseTree()
+
+	// sha3(length + BMT(pure_chunk))
+	if self.blockLength == nil {
+		return c
+	}
+	res := self.pool.hasher()
+	res.Reset()
+	res.Write(self.blockLength)
+	res.Write(c)
+	return res.Sum(nil)
 }
 
 // BMTHasher implements the io.Writer interface
@@ -289,7 +307,6 @@ func (self *BMTHasher) Sum(b []byte) (r []byte) {
 // with every full segment complete launches a hasher go routine
 // that shoots up the BMT
 func (self *BMTHasher) Write(b []byte) (int, error) {
-	self.getTree()
 	l := len(b)
 	if l <= 0 {
 		return 0, nil
@@ -312,7 +329,7 @@ func (self *BMTHasher) Write(b []byte) (int, error) {
 	}
 	s = append(s, b[:rest]...)
 	need -= rest
-	// fmt.Printf("l: %v, s: %x, need: %v, size: %v, index: %v\n", l, s, need, size, self.cur)
+	//fmt.Printf("l: %v, s: %x, need: %v, size: %v, index: %v\n", l, s, need, size, self.cur)
 	// read full segments and the last possibly partial segment
 	for need > 0 && i < count-1 {
 		// push all finished chunks we read
@@ -325,7 +342,7 @@ func (self *BMTHasher) Write(b []byte) (int, error) {
 		rest += size
 		i++
 	}
-	// fmt.Printf("open segment %v len %v\n (data: %v)\n", i, len(s), hashstr(s))
+	//fmt.Printf("open segment %v len %v\n (data: %v)\n", i, len(s), hashstr(s))
 	self.segment = s
 	self.cur = i
 	// otherwise, we can assume len(s) == 0, so all buffer is read and chunk is not yet full
@@ -361,9 +378,21 @@ func (self *BMTHasher) ReadFrom(r io.Reader) (m int64, err error) {
 	return int64(read), err
 }
 
-// Reset gives back the BMTree to the pool whereby it unlocks
-// it resets tree, segment and index
 func (self *BMTHasher) Reset() {
+	self.getTree()
+	self.blockLength = nil
+}
+
+// It implements the swarmHash interface
+func (self *BMTHasher) ResetWithLength(l []byte) {
+	self.Reset()
+	self.blockLength = l
+
+}
+
+// Release gives back the BMTree to the pool whereby it unlocks
+// it resets tree, segment and index
+func (self *BMTHasher) releaseTree() {
 	if self.bmt != nil {
 		n := self.bmt.leaves[self.cur]
 		for ; n != nil; n = n.parent {
@@ -372,10 +401,9 @@ func (self *BMTHasher) Reset() {
 				n.root = false
 			}
 		}
-		if self.release {
-			self.pool.Release(self.bmt)
-			self.bmt = nil
-		}
+		self.pool.Release(self.bmt)
+		self.bmt = nil
+
 	}
 	self.cur = 0
 	self.segment = nil
@@ -425,9 +453,10 @@ func (self *BMTHasher) writeSegment(i int, s []byte, d int) {
 
 	if len(s) > self.size && n.parent != nil {
 		go func() {
+			h.Reset()
 			h.Write(s)
 			s = h.Sum(nil)
-			h.Reset()
+
 			if n.root {
 				self.result <- s
 				return
@@ -453,10 +482,11 @@ func (self *BMTHasher) run(n *BMTNode, h hash.Hash, d int, i int, s []byte) {
 			return
 		}
 		if !n.unbalanced || !isLeft || i == 0 && d == 0 {
+			h.Reset()
 			h.Write(n.left)
 			h.Write(n.right)
 			s = h.Sum(nil)
-			h.Reset()
+
 		} else {
 			s = append(n.left, n.right...)
 		}
@@ -528,5 +558,14 @@ func (self *BMTHasher) finalise(n *BMTNode, i int) (d int) {
 		n = n.parent
 		d++
 	}
-	return d
+}
+
+// EOC implements the error interface
+func (self *EOC) Error() string {
+	return fmt.Sprintf("hasher limit reached, chunk hash: %x", self.Hash)
+}
+
+// creates new end of chunk error with the hash
+func NewEOC(hash []byte) *EOC {
+	return &EOC{hash}
 }

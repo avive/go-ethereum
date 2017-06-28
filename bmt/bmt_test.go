@@ -33,89 +33,14 @@ import (
 
 const (
 	maxproccnt = 8
-	maxpoolcap = 32
 )
 
 func testDataReader(l int) (r io.Reader) {
 	return io.LimitReader(crand.Reader, int64(l))
 }
 
-func TestOBMTHasher(t *testing.T) {
-	for n := 0; n <= 4096; n += 1 {
-		// fmt.Println("chunksize", n)
-		testOBMTHasherprv(n, t)
-	}
-}
-
-func testOBMTHasherprv(n int, t *testing.T) {
-
-	data := make([]byte, n)
-	tdata := testDataReader(n)
-	tdata.Read(data)
-
-	var tree *BTree
-	var r *Root
-	var count int
-	var err1 error
-	start := time.Now()
-	tree, r, count, err1 = BuildBMT(sha3.NewKeccak256, data, true)
-	elapsed := time.Since(start)
-	_ = elapsed
-	// log.Printf("n=%d took %s", n, elapsed)
-
-	if err1 != nil {
-		fmt.Println(tree, r, count, err1)
-		return
-	}
-	// for i := 0; i < count; i++ {
-	// 	p, err := tree.InclusionProof(i)
-	// 	if err != nil {
-	// 		fmt.Println("proof failed ", i, err.Error())
-	// 		continue
-	// 	}
-	// 	ok, err := r.CheckProof(sha3.NewKeccak256, p.proof, i)
-	//
-	// 	if !ok || (err != nil) {
-	// 		t.Errorf("proof %d failed", i)
-	// 	}
-	// }
-
-	offset := rand.Intn(n)
-	length := rand.Intn((n-offset+1)-1) + 1
-	p, err := tree.GetInclusionProofs(offset, length)
-	if err != nil {
-		t.Errorf("proof %d failed %s", offset, err)
-		return
-
-	}
-
-	ok, err := r.CheckProofs(sha3.NewKeccak256, p)
-
-	if !ok || (err != nil) {
-		t.Errorf("proof  failed %s", err)
-	} else {
-		// fmt.Println("proofs ok for offset", offset, "lenght", length, "chunksize", n)
-	}
-
-	// ok, err := r.CheckProof(sha3.NewKeccak256, p.proof, i)
-	//
-	// if !ok || (err != nil) {
-	// 	t.Errorf("proof %d failed", i)
-	// }
-
-	// fmt.Println("done")
-}
-
 func TestBMTHasherCorrectness(t *testing.T) {
 	err := testHasher(testBMTHasher)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCBMTHasherCorrectness(t *testing.T) {
-	t.Skip("not maintained")
-	err := testHasher(testCBMTHasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +58,9 @@ func testHasher(f func(Hasher, []byte, int, int) error) error {
 	for _, count := range counts {
 		max := count * size
 		incr := max/size + 1
+		fmt.Println("max=", max, "incr=", incr)
 		for n := 0; n <= max+incr; n += incr {
+			fmt.Println("     ", "datalen=", len(data), "n=", n, "count=", count)
 			err = f(hasher, data, n, count)
 			if err != nil {
 				return err
@@ -144,18 +71,18 @@ func testHasher(f func(Hasher, []byte, int, int) error) error {
 }
 
 func TestBMTHasherReuseWithoutRelease(t *testing.T) {
-	testBMTHasherReuse(t, false)
+	testBMTHasherReuse(t)
 }
 
 func TestBMTHasherReuseWithRelease(t *testing.T) {
-	testBMTHasherReuse(t, true)
+	testBMTHasherReuse(t)
 }
 
-func testBMTHasherReuse(t *testing.T, release bool) {
+func testBMTHasherReuse(t *testing.T) {
 	hasher := sha3.NewKeccak256
 	pool := NewBMTreePool(hasher, 128, 1)
 	defer pool.Drain(0)
-	bmt := NewBMTHasher(pool, true)
+	bmt := NewBMTHasher(pool)
 
 	for i := 0; i < 500; i++ {
 		n := rand.Intn(4096)
@@ -180,7 +107,7 @@ func TestBMTHasherConcurrency(t *testing.T) {
 	errc := make(chan error)
 
 	for p := 0; p < maxproccnt; p++ {
-		bmt := NewBMTHasher(pool, true)
+		bmt := NewBMTHasher(pool)
 		go func() {
 			for i := 0; i < cycles; i++ {
 				n := rand.Intn(4096)
@@ -212,26 +139,21 @@ func TestBMTHasherConcurrency(t *testing.T) {
 func testBMTHasher(hasher Hasher, d []byte, n, count int) error {
 	pool := NewBMTreePool(hasher, count, 1)
 	defer pool.Drain(0)
-	bmt := NewBMTHasher(pool, false)
+	bmt := NewBMTHasher(pool)
 	return testBMTHasherCorrectness(bmt, hasher, d, n, count)
 }
 
-func testCBMTHasher(hasher Hasher, d []byte, n, count int) error {
-	pool := NewCBMTreePool(hasher, count, 1)
-	bmt := NewCBMTHasher(pool)
-	return testBMTHasherCorrectness(bmt, hasher, d, n, ((count+1)/2)*2)
-}
-
 func testBMTHasherCorrectness(bmt hash.Hash, hasher Hasher, d []byte, n, count int) (err error) {
-	// fmt.Printf("\ndatasize: %v, segment count: %v\n", n, count)
 	data := d[:n]
 	rbmt := NewRBMTHasher(hasher, count)
 	exp := rbmt.Hash(data)
 	timeout := time.NewTimer(time.Second)
 	c := make(chan error)
 	go func() {
-		got := bmt.Sum(data)
-		// fmt.Printf("result %x\n", got)
+		bmt.Reset()
+		bmt.Write(data)
+		got := bmt.Sum(nil)
+		fmt.Printf("     result %x\n", got)
 		if !bytes.Equal(got, exp) {
 			var t string
 			node, ok := bmt.(*BMTHasher)
@@ -243,7 +165,7 @@ func testBMTHasherCorrectness(bmt hash.Hash, hasher Hasher, d []byte, n, count i
 		}
 
 		close(c)
-		bmt.Reset()
+
 	}()
 	select {
 	case _, ok := <-timeout.C:
@@ -290,21 +212,6 @@ func BenchmarkBMTHasherReuse_512b(t *testing.B) { benchmarkBMTHasherReuse(4096/8
 func BenchmarkBMTHasherReuse_256b(t *testing.B) { benchmarkBMTHasherReuse(4096/16, t) }
 func BenchmarkBMTHasherReuse_128b(t *testing.B) { benchmarkBMTHasherReuse(4096/32, t) }
 
-func BenchmarkOBMTHasher_4k(t *testing.B)   { benchmarkOBMTHasher(4096, t) }
-func BenchmarkOBMTHasher_2k(t *testing.B)   { benchmarkOBMTHasher(4096/2, t) }
-func BenchmarkOBMTHasher_1k(t *testing.B)   { benchmarkOBMTHasher(4096/4, t) }
-func BenchmarkOBMTHasher_512b(t *testing.B) { benchmarkOBMTHasher(4096/8, t) }
-func BenchmarkOBMTHasher_256b(t *testing.B) { benchmarkOBMTHasher(4096/16, t) }
-func BenchmarkOBMTHasher_128b(t *testing.B) { benchmarkOBMTHasher(4096/32, t) }
-
-//
-// func BenchmarkCBMTHasher_4k(t *testing.B)   { benchmarkCBMTHasher(4096, t) }
-// func BenchmarkCBMTHasher_2k(t *testing.B)   { benchmarkCBMTHasher(4096/2, t) }
-// func BenchmarkCBMTHasher_1k(t *testing.B)   { benchmarkCBMTHasher(4096/4, t) }
-// func BenchmarkCBMTHasher_512b(t *testing.B) { benchmarkCBMTHasher(4096/8, t) }
-// func BenchmarkCBMTHasher_256b(t *testing.B) { benchmarkCBMTHasher(4096/16, t) }
-// func BenchmarkCBMTHasher_128b(t *testing.B) { benchmarkCBMTHasher(4096/32, t) }
-
 // benchmarks the minimum hashing time for a balanced (for simplicity) BMT
 // by doing count/segmentsize parallel hashings of 2*segmentsize bytes
 // doing it on n maxproccnt each reusing the base hasher
@@ -328,54 +235,13 @@ func benchmarkBMTBaseline(n int, t *testing.B) {
 				defer wg.Done()
 				h := hasher()
 				for atomic.AddInt32(&i, 1) < count {
+					h.Reset()
 					h.Write(data)
 					h.Sum(nil)
-					h.Reset()
 				}
 			}()
 		}
 		wg.Wait()
-	}
-}
-
-func benchmarkOBMTHasher(n int, t *testing.B) {
-	tdata := testDataReader(n)
-	data := make([]byte, n)
-	tdata.Read(data)
-
-	var tree *BTree
-	var r *Root
-	var count int
-	var err1 error
-
-	t.ReportAllocs()
-	t.ResetTimer()
-	for i := 0; i < t.N; i++ {
-		tree, r, count, err1 = BuildBMT(sha3.NewKeccak256, data, false)
-		if err1 != nil {
-			fmt.Println(err1, tree, r, count)
-			return
-		}
-	}
-}
-
-func benchmarkCBMTHasher(n int, t *testing.B) {
-	tdata := testDataReader(n)
-	data := make([]byte, n)
-	tdata.Read(data)
-
-	size := 1
-	hasher := sha3.NewKeccak256
-	segmentCount := 128
-	pool := NewCBMTreePool(hasher, segmentCount, size)
-	bmt := NewCBMTHasher(pool)
-
-	t.ReportAllocs()
-	t.ResetTimer()
-	for i := 0; i < t.N; i++ {
-		bmt.Write(data)
-		bmt.Sum(nil)
-		bmt.Reset()
 	}
 }
 
@@ -388,15 +254,14 @@ func benchmarkBMTHasher(n int, t *testing.B) {
 	hasher := sha3.NewKeccak256
 	segmentCount := 128
 	pool := NewBMTreePool(hasher, segmentCount, size)
-	// bmt := NewBMTHasher(pool, false)
-	bmt := NewBMTHasher(pool, true)
+	bmt := NewBMTHasher(pool)
 
 	t.ReportAllocs()
 	t.ResetTimer()
 	for i := 0; i < t.N; i++ {
+		bmt.Reset()
 		bmt.Write(data)
 		bmt.Sum(nil)
-		bmt.Reset()
 	}
 }
 
@@ -409,14 +274,14 @@ func benchmarkBMTHasherReuse(n int, t *testing.B) {
 	hasher := sha3.NewKeccak256
 	segmentCount := 128
 	pool := NewBMTreePool(hasher, segmentCount, size)
-	bmt := NewBMTHasher(pool, false)
+	bmt := NewBMTHasher(pool)
 
 	t.ReportAllocs()
 	t.ResetTimer()
 	for i := 0; i < t.N; i++ {
+		bmt.Reset()
 		bmt.Write(data)
 		bmt.Sum(nil)
-		bmt.Reset()
 	}
 }
 
@@ -430,9 +295,9 @@ func benchmarkSHA3(n int, t *testing.B) {
 	t.ReportAllocs()
 	t.ResetTimer()
 	for i := 0; i < t.N; i++ {
+		h.Reset()
 		h.Write(data)
 		h.Sum(nil)
-		h.Reset()
 	}
 }
 
